@@ -71,22 +71,36 @@ public struct URITemplate : CustomStringConvertible, Equatable, Hashable, Expres
   }
 
   /// Returns the set of keywords in the URI Template
-  public var variables: [String] {
+  public var variables: [String] { variables(for: .all) }
+
+  public var optinalVariables: [String] { variables(for: .optional) }
+
+  public var requiredVariables: [String] { variables(for: .required) }
+
+  enum VaraibleType {
+    case all
+    case required
+    case optional
+  }
+
+  func variables(for type: VaraibleType) -> [String] {
     let expressions = regex.matches(template).map { expression -> String in
       // Removes the { and } from the expression
       return String(expression[expression.index(after: expression.startIndex)..<expression.index(before: expression.endIndex)])
     }
 
-    return expressions.map { expression -> [String] in
+    return expressions.compactMap { expression -> [String]? in
       var expression = expression
+      let op = operators.first(where: { $0.op == String(expression.prefix($0.op?.count ?? 0)) })
 
-      for op in self.operators {
-        if let op = op.op {
-          if expression.hasPrefix(op) {
-            expression = String(expression[expression.index(after: expression.startIndex)...])
-            break
-          }
-        }
+      switch type {
+      case .optional: if op?.isOptional == false { return nil }
+      case .required: if op?.isOptional == true { return nil }
+      case .all: break
+      }
+
+      if op != nil {
+        expression = String(expression[expression.index(after: expression.startIndex)...])
       }
 
       return expression.components(separatedBy: ",").map { component in
@@ -286,11 +300,15 @@ protocol Operator {
   /// Character to use to join expanded components
   var joiner:String { get }
 
+  /// Is value optional
+  var isOptional:Bool { get }
+
   func expand(_ variable:String, value: Any?, explode:Bool, prefix:Int?) -> String?
 }
 
 class BaseOperator {
   var joiner:String { return "," }
+  var isOptional:Bool { return false }
 
   func expand(_ variable:String, value: Any?, explode:Bool, prefix:Int?) -> String? {
     if let value = value {
@@ -479,6 +497,7 @@ class FormStyleQueryExpansion : BaseOperator, Operator {
   var op:String? { return "?" }
   var prefix:String { return "?" }
   override var joiner:String { return "&" }
+  override var isOptional:Bool { return true }
 
   override func expand(value:String) -> String {
     return value.percentEncoded()
@@ -535,6 +554,7 @@ class FormStyleQueryContinuation : BaseOperator, Operator {
   var op:String? { return "&" }
   var prefix:String { return "&" }
   override var joiner:String { return "&" }
+  override var isOptional:Bool { return true }
 
   override func expand(value:String) -> String {
     return value.percentEncoded()
